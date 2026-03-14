@@ -586,6 +586,60 @@ def inject_style() -> None:
             z-index: 2000;
             backdrop-filter: blur(6px);
         }
+        @media (max-width: 820px) {
+            .block-container {
+                padding-top: 0.35rem;
+                padding-bottom: 8.5rem;
+            }
+            .section-title {
+                font-size: 1.25rem;
+                margin-bottom: 0.45rem;
+            }
+            .section-copy {
+                font-size: 0.92rem;
+                line-height: 1.7;
+            }
+            .soft-card,
+            .entry-card {
+                border-radius: 18px;
+                padding: 0.95rem 0.9rem;
+                margin-bottom: 0.8rem;
+            }
+            .entry-head {
+                gap: 0.35rem;
+                margin-bottom: 0.55rem;
+            }
+            .entry-meta {
+                width: 100%;
+                font-size: 0.8rem;
+            }
+            .entry-body {
+                font-size: 0.94rem;
+                line-height: 1.7;
+            }
+            .floating-shortcut {
+                right: 12px !important;
+                left: 12px !important;
+            }
+            .floating-shortcut.left {
+                bottom: 74px;
+            }
+            .floating-shortcut.right {
+                bottom: 12px;
+            }
+            .floating-shortcut a {
+                display: flex;
+                width: 100%;
+                min-width: 0;
+                min-height: 48px;
+                padding: 0 14px;
+                font-size: 0.88rem;
+                text-align: center;
+            }
+            .app-loading-overlay {
+                font-size: 1.2rem;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -599,13 +653,67 @@ def show_loading_overlay():
 
 
 def render_navigation_buttons(current_page: str) -> None:
-    st.markdown('<div class="nav-shell">', unsafe_allow_html=True)
-    cols = st.columns(len(NAV_PAGES))
-    for index, (slug, label) in enumerate(NAV_PAGES):
-        button_type = "primary" if slug == current_page else "secondary"
-        if cols[index].button(label, key=f"nav_{slug}", type=button_type, width="stretch"):
-            navigate_to(slug)
-    st.markdown("</div>", unsafe_allow_html=True)
+    auth_input = f'<input type="hidden" name="auth" value="{AUTH_QUERY_VALUE}">' if st.session_state.get("member_authenticated") else ""
+    items = []
+    for slug, label in NAV_PAGES:
+        active = " is-active" if slug == current_page else ""
+        items.append(
+            f"""
+            <form class="top-nav-form" method="get" action="">
+              <input type="hidden" name="page" value="{slug}">
+              {auth_input}
+              <button class="top-nav-button{active}" type="submit">{escape_html(label)}</button>
+            </form>
+            """
+        )
+    st.html(
+        """
+        <style>
+        .top-nav {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin-bottom: 1rem;
+        }
+        .top-nav-form {
+            margin: 0;
+        }
+        .top-nav-button {
+            width: 100%;
+            min-height: 46px;
+            border-radius: 16px;
+            border: 1px solid rgba(116, 101, 176, 0.18);
+            background: rgba(255, 255, 255, 0.72);
+            color: #403469;
+            font-weight: 700;
+            font-size: 0.9rem;
+            box-shadow: 0 10px 22px rgba(83, 70, 143, 0.08);
+            cursor: pointer;
+        }
+        .top-nav-button.is-active {
+            background: linear-gradient(145deg, rgba(122, 103, 199, 0.96), rgba(89, 123, 202, 0.95));
+            color: #fff;
+        }
+        @media (max-width: 820px) {
+            .top-nav {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.5rem;
+            }
+            .top-nav-button {
+                min-height: 42px;
+                border-radius: 14px;
+                font-size: 0.84rem;
+            }
+        }
+        </style>
+        <div class="top-nav">
+        """
+        + "".join(items)
+        + """
+        </div>
+        """,
+        unsafe_allow_javascript=True,
+    )
 
 
 def render_member_login_shortcut() -> None:
@@ -925,10 +1033,86 @@ def render_home_hero() -> None:
         font-size: 0.92rem;
       }}
       @media (max-width: 640px) {{
-        .hero-stage {{ padding-top: 18px; }}
-        .menu-shell {{ padding-top: 62px; }}
-        .menu-card {{ min-height: 118px; }}
-        .menu-grid {{ grid-template-columns: 1fr; }}
+        .hero-stage {{
+          min-height: 100dvh;
+          padding-top: 16px;
+          padding-bottom: 144px;
+        }}
+        .hero {{
+          width: 94%;
+        }}
+        .logo-shell {{
+          width: min(92vw, 520px);
+        }}
+        .logo-img {{
+          max-height: 42vh;
+        }}
+        .hero-title {{
+          margin-top: 12px;
+          font-size: clamp(1.6rem, 8vw, 2.4rem);
+        }}
+        .hero-copy {{
+          margin-top: 10px;
+          font-size: 0.9rem;
+          line-height: 1.7;
+        }}
+        .scroll-note {{
+          margin-top: 12px;
+          font-size: 0.76rem;
+        }}
+        .menu-shell {{
+          padding: 54px 12px 132px;
+        }}
+        .menu-panel {{
+          width: 100%;
+        }}
+        .countdown-card {{
+          width: 100%;
+          padding: 0.8rem 0.9rem;
+          border-radius: 18px;
+          margin-bottom: 12px;
+        }}
+        .countdown-label {{
+          font-size: 0.72rem;
+        }}
+        .countdown-days {{
+          font-size: clamp(1.2rem, 6vw, 1.6rem);
+        }}
+        .countdown-date {{
+          font-size: 0.8rem;
+        }}
+        .menu-title {{
+          font-size: 1.25rem;
+          margin-bottom: 12px;
+        }}
+        .menu-card {{
+          min-height: 104px;
+          border-radius: 18px;
+          padding: 16px 14px;
+        }}
+        .menu-card strong {{
+          margin-bottom: 6px;
+          font-size: 0.96rem;
+        }}
+        .menu-card span {{
+          font-size: 0.86rem;
+          line-height: 1.55;
+        }}
+        .menu-grid {{
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }}
+        .member-login-fab {{
+          left: 12px;
+          right: 12px;
+          bottom: 12px;
+        }}
+        .member-login-btn {{
+          width: 100%;
+          min-width: 0;
+          min-height: 48px;
+          font-size: 0.88rem;
+        }}
       }}
     </style>
     <section class="hero-wrap">
@@ -1056,26 +1240,6 @@ def render_home_hero() -> None:
 def render_home(messages: list[dict], minutes: list[dict], members: list[dict]) -> None:
     render_project_voice_shortcut()
     render_home_hero()
-    stats = st.columns(3)
-    stats[0].metric("100周年News", str(len(messages)))
-    stats[1].metric("お知らせ", str(len(minutes)))
-    stats[2].metric("プロジェクトメンバー", str(len(members)))
-
-    latest_cols = st.columns(2, gap="large")
-    with latest_cols[0]:
-        st.markdown('<div class="section-title">最新の100周年News</div>', unsafe_allow_html=True)
-        if messages:
-            latest = sorted_entries(messages)[0]
-            render_entry(latest, "最新News", format_dt(latest.get("createdAt")), "home_message")
-        else:
-            st.info("100周年News はまだありません。")
-    with latest_cols[1]:
-        st.markdown('<div class="section-title">最新のお知らせ</div>', unsafe_allow_html=True)
-        if minutes:
-            latest = sorted_entries(minutes)[0]
-            render_entry(latest, "最新のお知らせ", format_dt(latest.get("createdAt")), "home_minutes")
-        else:
-            st.info("お知らせはまだありません。")
 
 
 def render_message_page(messages: list[dict]) -> None:
@@ -1188,6 +1352,49 @@ def render_task_map(tasks: list[dict]) -> None:
         .task-map-empty { color: var(--muted); font-size: 0.92rem; }
         .task-map-x-label { text-align: center; color: var(--muted); font-weight: 600; margin-top: 0.8rem; letter-spacing: 0.06em; }
         .task-map-x-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; padding: 0 0.3rem; }
+        @media (max-width: 820px) {
+            .task-map-axis { grid-template-columns: 1fr; gap: 0.55rem; }
+            .task-map-y-label {
+                writing-mode: horizontal-tb;
+                justify-content: flex-start;
+                font-size: 0.88rem;
+            }
+            .task-map-body {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto;
+                min-height: 0;
+                gap: 0.65rem;
+            }
+            .task-map-cell {
+                border-radius: 16px;
+                padding: 0.85rem;
+            }
+            .task-map-cell h4 {
+                font-size: 0.9rem;
+                margin-bottom: 0.6rem;
+            }
+            .task-map-items {
+                gap: 0.55rem;
+            }
+            .task-map-item {
+                width: 100%;
+                min-width: 0;
+                padding: 0.72rem 0.82rem;
+            }
+            .task-map-tooltip {
+                left: 0;
+                right: 0;
+                bottom: calc(100% + 8px);
+                transform: none;
+                width: auto;
+                font-size: 0.86rem;
+                line-height: 1.5;
+            }
+            .task-map-x-label,
+            .task-map-x-ends {
+                display: none;
+            }
+        }
         </style>
         <div class="task-map-shell">
           <div class="task-map-axis">
