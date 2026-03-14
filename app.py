@@ -1353,46 +1353,50 @@ def render_task_map(tasks: list[dict]) -> None:
         .task-map-x-label { text-align: center; color: var(--muted); font-weight: 600; margin-top: 0.8rem; letter-spacing: 0.06em; }
         .task-map-x-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; padding: 0 0.3rem; }
         @media (max-width: 820px) {
-            .task-map-axis { grid-template-columns: 1fr; gap: 0.55rem; }
+            .task-map-shell {
+                overflow-x: auto;
+                padding-bottom: 0.2rem;
+            }
+            .task-map-axis {
+                grid-template-columns: 52px minmax(560px, 1fr);
+                gap: 0.55rem;
+                min-width: 612px;
+            }
             .task-map-y-label {
-                writing-mode: horizontal-tb;
-                justify-content: flex-start;
-                font-size: 0.88rem;
+                font-size: 0.82rem;
+                letter-spacing: 0.04em;
             }
             .task-map-body {
-                grid-template-columns: 1fr;
-                grid-template-rows: auto;
-                min-height: 0;
-                gap: 0.65rem;
+                min-height: 22rem;
+                gap: 0.6rem;
             }
             .task-map-cell {
                 border-radius: 16px;
-                padding: 0.85rem;
+                padding: 0.78rem;
             }
             .task-map-cell h4 {
-                font-size: 0.9rem;
-                margin-bottom: 0.6rem;
+                font-size: 0.84rem;
+                margin-bottom: 0.55rem;
             }
             .task-map-items {
-                gap: 0.55rem;
+                gap: 0.5rem;
             }
             .task-map-item {
-                width: 100%;
-                min-width: 0;
-                padding: 0.72rem 0.82rem;
+                min-width: 7.4rem;
+                padding: 0.68rem 0.72rem;
+                font-size: 0.84rem;
             }
             .task-map-tooltip {
-                left: 0;
-                right: 0;
-                bottom: calc(100% + 8px);
-                transform: none;
-                width: auto;
-                font-size: 0.86rem;
-                line-height: 1.5;
+                width: min(260px, 62vw);
+                font-size: 0.82rem;
+                line-height: 1.45;
             }
-            .task-map-x-label,
+            .task-map-x-label {
+                margin-top: 0.55rem;
+                font-size: 0.82rem;
+            }
             .task-map-x-ends {
-                display: none;
+                font-size: 0.76rem;
             }
         }
         </style>
