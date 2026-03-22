@@ -64,3 +64,41 @@ GitHub Desktop を使う場合の流れ:
 1. GitHub 用にリポジトリを作る
 2. このフォルダを最初のコミットとして push する
 3. Streamlit Community Cloud で `app.py` を指定して公開する
+
+## Githubアップロード方法
+
+通常手順
+
+PowerShell で対象フォルダへ移動
+cd "C:\ブラウザ用アプリ\100周年特設ページ_公開用"
+変更確認
+git status
+必要なら構文確認
+python -m py_compile app.py
+変更を追加
+git add .
+コミット
+git commit -m "変更内容を短く説明"
+GitHub へ反映
+git push
+もし push で弾かれた場合
+GitHub 側に先の更新があるので、先に取り込みます。
+
+git pull --rebase origin main
+git push
+もし競合が出た場合
+今回と同じで、反映したい内容を残してから続行します。
+
+git status
+git add .
+git rebase --continue
+git push
+最初に確認しておくとよいコマンド
+
+git remote -v
+git branch
+公開まで含めた流れ
+
+GitHub に push
+Streamlit Cloud を使っているなら、その後は同じリポジトリから自動で再デプロイされることが多いです
+手動再起動が必要な場合は Streamlit 側で Reboot か Redeploy
