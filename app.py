@@ -292,6 +292,7 @@ def get_allowed_pages(member_authenticated: bool) -> list[tuple[str, str]]:
         [
             ("voice", "100周年プロジェクトへの声"),
             ("members", "プロジェクトメンバー ログイン"),
+            ("easteregg", "Easter Egg"),
         ]
     )
     if member_authenticated:
@@ -358,10 +359,25 @@ def image_to_data_uri(path: str) -> str:
 
 
 def find_logo_path() -> Path | None:
-    candidates = []
-    for pattern in ("100周年ロゴ.*", "*100周年*ロゴ*.*", "*100*周年*ロゴ*.*"):
-        candidates.extend(sorted(ASSETS_DIR.glob(pattern)))
-    return candidates[0] if candidates else None
+    priority_patterns = (
+        "100周年ロゴ.png",
+        "*100周年*ロゴ*.png",
+        "*100*周年*ロゴ*.png",
+        "100周年ロゴ.webp",
+        "*100周年*ロゴ*.webp",
+        "*100*周年*ロゴ*.webp",
+        "100周年ロゴ.jpg",
+        "100周年ロゴ.jpeg",
+        "*100周年*ロゴ*.jpg",
+        "*100周年*ロゴ*.jpeg",
+        "*100*周年*ロゴ*.jpg",
+        "*100*周年*ロゴ*.jpeg",
+    )
+    for pattern in priority_patterns:
+        matches = sorted(ASSETS_DIR.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
 
 
 def escape_html(text: str) -> str:
@@ -547,7 +563,8 @@ def inject_style() -> None:
         .floating-shortcut.right {
             right: 18px;
         }
-        .floating-shortcut a {
+        .floating-shortcut a,
+        .floating-shortcut button {
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -563,6 +580,7 @@ def inject_style() -> None:
             text-decoration: none;
             box-shadow: 0 14px 28px rgba(83, 70, 143, 0.14);
             backdrop-filter: blur(10px);
+            cursor: pointer;
         }
         .workspace-note {
             padding: 0.9rem 1rem;
@@ -627,7 +645,8 @@ def inject_style() -> None:
             .floating-shortcut.right {
                 bottom: 12px;
             }
-            .floating-shortcut a {
+            .floating-shortcut a,
+            .floating-shortcut button {
                 display: flex;
                 width: 100%;
                 min-width: 0;
@@ -717,13 +736,98 @@ def render_navigation_buttons(current_page: str) -> None:
 
 
 def render_member_login_shortcut() -> None:
-    st.markdown(
+    logo_path = find_logo_path()
+    logo_src = image_to_data_uri(str(logo_path)) if logo_path else ""
+    logo_html = f'<img src="{logo_src}" alt="100周年ロゴ">' if logo_src else '<span>100</span>'
+    st.html(
         f"""
-        <div class="floating-shortcut left">
-          <a href="{build_page_href('members')}">プロジェクトメンバー ログイン</a>
+        <style>
+        .logo-unlock-shell {{
+            position: fixed;
+            left: max(12px, env(safe-area-inset-left));
+            bottom: calc(max(12px, env(safe-area-inset-bottom)) + 0px);
+            z-index: 999;
+            width: clamp(54px, 7vw, 76px);
+            height: clamp(54px, 7vw, 76px);
+        }}
+        .logo-unlock-button {{
+            width: 100%;
+            height: 100%;
+            display: block;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            backdrop-filter: none;
+            padding: 0;
+            margin: 0;
+            outline: none;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }}
+        .logo-unlock-button img {{
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            mix-blend-mode: multiply;
+            opacity: 0.96;
+            filter: drop-shadow(0 10px 18px rgba(83, 70, 143, 0.08));
+        }}
+        .logo-unlock-button span {{
+            display: flex;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: center;
+            color: #403469;
+            font-weight: 800;
+            font-size: 1.15rem;
+        }}
+        @media (max-width: 820px) {{
+            .logo-unlock-shell {{
+                left: max(12px, env(safe-area-inset-left));
+                bottom: calc(max(12px, env(safe-area-inset-bottom)) + 86px);
+                width: 58px;
+                height: 58px;
+            }}
+        }}
+        </style>
+        <div class="logo-unlock-shell">
+          <div class="logo-unlock-button" id="logo-unlock-button" role="button" tabindex="0" aria-label="メンバーログイン" data-target="{build_page_href('members')}">
+            {logo_html}
+          </div>
         </div>
+        <script>
+          const unlockButton = document.getElementById("logo-unlock-button");
+          if (unlockButton && !unlockButton.dataset.bound) {{
+            unlockButton.dataset.bound = "true";
+            let clickCount = 0;
+            let timerId = null;
+            const handleUnlockClick = () => {{
+              clickCount += 1;
+              if (timerId) window.clearTimeout(timerId);
+              if (clickCount >= 3) {{
+                window.location.href = unlockButton.dataset.target;
+                return;
+              }}
+              timerId = window.setTimeout(() => {{
+                clickCount = 0;
+              }}, 900);
+            }};
+            unlockButton.addEventListener("click", handleUnlockClick);
+            unlockButton.addEventListener("keydown", (event) => {{
+              if (event.key === "Enter" || event.key === " ") {{
+                event.preventDefault();
+                handleUnlockClick();
+              }}
+            }});
+          }}
+        </script>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -876,6 +980,9 @@ def render_home_hero() -> None:
         opacity: 1;
         filter: blur(0);
       }}
+      .hero-easter-ready .logo-img {{
+        filter: drop-shadow(0 18px 30px rgba(95, 83, 166, 0.08)) brightness(1.02);
+      }}
       .logo-shell {{
         position: relative;
         width: min(760px, 92%);
@@ -897,8 +1004,9 @@ def render_home_hero() -> None:
         width: 100%;
         max-height: 62vh;
         object-fit: contain;
-        opacity: 0.99;
-        filter: drop-shadow(0 18px 30px rgba(95, 83, 166, 0.10));
+        opacity: 0.96;
+        mix-blend-mode: multiply;
+        filter: drop-shadow(0 18px 30px rgba(95, 83, 166, 0.08));
       }}
       .hero-title {{
         margin: 18px 0 0;
@@ -906,12 +1014,6 @@ def render_home_hero() -> None:
         font-size: clamp(2rem, 5vw, 4rem);
         letter-spacing: 0.08em;
         color: #352c5d;
-      }}
-      .hero-copy {{
-        margin-top: 12px;
-        color: #5b537c;
-        line-height: 1.9;
-        font-size: 0.98rem;
       }}
       .scroll-note {{
         margin-top: 16px;
@@ -973,28 +1075,34 @@ def render_home_hero() -> None:
         transition: opacity 0.5s ease, transform 0.5s ease;
         pointer-events: none;
       }}
-      .member-login-btn {{
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 240px;
-        min-height: 52px;
-        padding: 0 18px;
-        border-radius: 999px;
-        border: 1px solid rgba(116, 101, 176, 0.22);
-        background: linear-gradient(145deg, rgba(255,255,255,0.88), rgba(241,237,252,0.76));
-        color: #403469;
-        font-weight: 700;
-        font-size: 0.92rem;
-        box-shadow: 0 14px 28px rgba(83, 70, 143, 0.14);
+      .member-login-logo {{
+        width: 76px;
+        height: 76px;
+        border-radius: 22px;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        padding: 0;
         cursor: pointer;
       }}
-      .menu-title {{
-        margin: 0 0 18px;
-        text-align: center;
-        color: #352c5d;
-        font-family: "Yu Mincho", "Hiragino Mincho ProN", "MS PMincho", serif;
-        font-size: clamp(1.5rem, 3vw, 2rem);
+      .member-login-logo img {{
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+        mix-blend-mode: multiply;
+        opacity: 0.96;
+        filter: drop-shadow(0 10px 18px rgba(83, 70, 143, 0.08));
+      }}
+      .member-login-logo span {{
+        display: flex;
+        width: 100%;
+        height: 100%;
+        align-items: center;
+        justify-content: center;
+        color: #403469;
+        font-weight: 800;
+        font-size: 1.15rem;
       }}
       .menu-grid {{
         display: grid;
@@ -1051,11 +1159,6 @@ def render_home_hero() -> None:
           margin-top: 12px;
           font-size: clamp(1.6rem, 8vw, 2.4rem);
         }}
-        .hero-copy {{
-          margin-top: 10px;
-          font-size: 0.9rem;
-          line-height: 1.7;
-        }}
         .scroll-note {{
           margin-top: 12px;
           font-size: 0.76rem;
@@ -1081,10 +1184,6 @@ def render_home_hero() -> None:
         .countdown-date {{
           font-size: 0.8rem;
         }}
-        .menu-title {{
-          font-size: 1.25rem;
-          margin-bottom: 12px;
-        }}
         .menu-card {{
           min-height: 104px;
           border-radius: 18px;
@@ -1104,14 +1203,13 @@ def render_home_hero() -> None:
         }}
         .member-login-fab {{
           left: 12px;
-          right: 12px;
           bottom: 12px;
         }}
-        .member-login-btn {{
-          width: 100%;
-          min-width: 0;
-          min-height: 48px;
-          font-size: 0.88rem;
+        .member-login-logo {{
+          width: 64px;
+          height: 64px;
+          border-radius: 0;
+          padding: 0;
         }}
       }}
     </style>
@@ -1120,7 +1218,6 @@ def render_home_hero() -> None:
         <div class="hero" id="hero">
           {f'<div class="logo-shell"><img class="logo-img" src="{logo_src}" alt="100周年ロゴ"></div>' if logo_src else '<div class="logo-shell"></div>'}
           <h1 class="hero-title">100周年特設ページ</h1>
-          <div class="hero-copy">ロゴから全社共有へ自然につながる公開トップです。ホイール操作でメニュー画面へ移ります。</div>
           <div class="scroll-note">SCROLL OR SWIPE</div>
         </div>
         <div class="menu-shell">
@@ -1130,7 +1227,6 @@ def render_home_hero() -> None:
               <div class="countdown-days">式典まであと {countdown_days}日</div>
               <div class="countdown-date">2026年10月11日</div>
             </div>
-            <h2 class="menu-title">コンテンツメニュー</h2>
             <div class="menu-grid">
               <form class="menu-card-form" method="get" action="" target="_top">
                 <input type="hidden" name="page" value="message">
@@ -1159,20 +1255,28 @@ def render_home_hero() -> None:
             </div>
           </div>
         </div>
-        <form class="member-login-fab" method="get" action="" target="_top">
-          <input type="hidden" name="page" value="members">
-          {auth_input}
-          <button class="member-login-btn" type="submit">プロジェクトメンバー ログイン</button>
-        </form>
+        <div class="member-login-fab">
+          <div class="member-login-logo" id="member-login-logo" role="button" tabindex="0" aria-label="メンバーログイン" data-target="{build_page_href('members')}">
+            {f'<img src="{logo_src}" alt="100周年ロゴ">' if logo_src else '<span>100</span>'}
+          </div>
+        </div>
       </div>
     </section>
     <script>
       const hero = document.getElementById("hero");
       const menu = document.getElementById("menu");
       const memberLoginFab = document.querySelector(".member-login-fab");
+      const memberLoginLogo = document.getElementById("member-login-logo");
+      const heroLogo = hero ? hero.querySelector(".logo-img") : null;
       let view = 0;
       let wheelLock = false;
       let touchStartY = null;
+      let loginClickCount = 0;
+      let loginClickTimer = null;
+      let easterHoverReady = false;
+      let easterClickCount = 0;
+      let easterHoverTimer = null;
+      let easterClickTimer = null;
       requestAnimationFrame(() => hero.classList.add("ready"));
 
       function sync() {{
@@ -1225,6 +1329,56 @@ def render_home_hero() -> None:
         const delta = touchStartY - event.changedTouches[0].clientY;
         if (Math.abs(delta) > 24) switchView(delta > 0 ? 1 : 0);
         touchStartY = null;
+      }}
+
+      function resetEasterEgg() {{
+        easterHoverReady = false;
+        easterClickCount = 0;
+        if (easterHoverTimer) window.clearTimeout(easterHoverTimer);
+        if (easterClickTimer) window.clearTimeout(easterClickTimer);
+        easterHoverTimer = null;
+        easterClickTimer = null;
+        hero.classList.remove("hero-easter-ready");
+      }}
+
+      if (memberLoginLogo) {{
+        memberLoginLogo.addEventListener("click", () => {{
+          loginClickCount += 1;
+          if (loginClickTimer) window.clearTimeout(loginClickTimer);
+          if (loginClickCount >= 3) {{
+            window.location.href = memberLoginLogo.dataset.target;
+            return;
+          }}
+          loginClickTimer = window.setTimeout(() => {{
+            loginClickCount = 0;
+          }}, 900);
+        }});
+      }}
+
+      if (heroLogo) {{
+        heroLogo.addEventListener("mouseenter", () => {{
+          if (easterHoverReady) return;
+          if (easterHoverTimer) window.clearTimeout(easterHoverTimer);
+          easterHoverTimer = window.setTimeout(() => {{
+            easterHoverReady = true;
+            hero.classList.add("hero-easter-ready");
+          }}, 3000);
+        }});
+        heroLogo.addEventListener("mouseleave", () => {{
+          resetEasterEgg();
+        }});
+        heroLogo.addEventListener("click", () => {{
+          if (!easterHoverReady) return;
+          easterClickCount += 1;
+          if (easterClickTimer) window.clearTimeout(easterClickTimer);
+          if (easterClickCount >= 3) {{
+            window.location.href = "{build_page_href('easteregg')}";
+            return;
+          }}
+          easterClickTimer = window.setTimeout(() => {{
+            easterClickCount = 0;
+          }}, 1200);
+        }});
       }}
 
       sync();
@@ -1835,6 +1989,162 @@ def render_workspace() -> None:
                     navigate_to("workspace", section="planning")
 
 
+def render_easter_egg_page() -> None:
+    logo_path = find_logo_path()
+    logo_src = image_to_data_uri(str(logo_path)) if logo_path else ""
+    easter_html = f"""
+    <style>
+      .egg-shell {{
+        position: relative;
+        min-height: 100vh;
+        overflow: hidden;
+        border-radius: 28px;
+      }}
+      .egg-canvas {{
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }}
+      .egg-content {{
+        position: relative;
+        z-index: 2;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }}
+      .egg-card {{
+        width: min(760px, 92vw);
+        padding: 2rem 1.4rem 1.6rem;
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        backdrop-filter: blur(14px);
+        text-align: center;
+        box-shadow: 0 24px 60px rgba(32, 26, 58, 0.22);
+      }}
+      .egg-logo {{
+        width: min(340px, 72vw);
+        margin: 0 auto 1.25rem;
+        display: block;
+        mix-blend-mode: screen;
+        filter: drop-shadow(0 18px 32px rgba(255,255,255,0.12));
+      }}
+      .egg-title {{
+        font-family: "Yu Mincho", "Hiragino Mincho ProN", "MS PMincho", serif;
+        color: #fff;
+        font-size: clamp(1.5rem, 4vw, 2.4rem);
+        margin-bottom: 1rem;
+        letter-spacing: 0.06em;
+      }}
+      .egg-copy {{
+        color: rgba(255,255,255,0.92);
+        font-size: clamp(0.98rem, 2vw, 1.12rem);
+        line-height: 1.95;
+        white-space: pre-wrap;
+      }}
+    </style>
+    <section class="egg-shell">
+      <canvas class="egg-canvas" id="egg-canvas"></canvas>
+      <div class="egg-content">
+        <div class="egg-card">
+          {f'<img class="egg-logo" src="{logo_src}" alt="100周年ロゴ">' if logo_src else ''}
+          <div class="egg-title">100周年ありがとう</div>
+          <div class="egg-copy">このページを発見したことと「100周年ありがとう」のメッセージを営業部 見谷までお知らせください。もしあなたが一番最初の発見者だった場合、素敵な特典が用意されています。</div>
+        </div>
+      </div>
+    </section>
+    <script>
+      const canvas = document.getElementById("egg-canvas");
+      const ctx = canvas.getContext("2d");
+      const fireworks = [];
+      const particles = [];
+
+      function resizeCanvas() {{
+        canvas.width = canvas.clientWidth * window.devicePixelRatio;
+        canvas.height = canvas.clientHeight * window.devicePixelRatio;
+        ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+      }}
+
+      function rand(min, max) {{
+        return Math.random() * (max - min) + min;
+      }}
+
+      function launchFirework() {{
+        fireworks.push({{
+          x: rand(80, canvas.clientWidth - 80),
+          y: canvas.clientHeight + 20,
+          targetY: rand(90, canvas.clientHeight * 0.45),
+          speed: rand(5, 7.5),
+          hue: rand(0, 360),
+        }});
+      }}
+
+      function burst(firework) {{
+        for (let i = 0; i < 36; i += 1) {{
+          const angle = (Math.PI * 2 * i) / 36;
+          const velocity = rand(1.4, 4.8);
+          particles.push({{
+            x: firework.x,
+            y: firework.targetY,
+            vx: Math.cos(angle) * velocity,
+            vy: Math.sin(angle) * velocity,
+            alpha: 1,
+            life: rand(32, 48),
+            hue: firework.hue + rand(-18, 18),
+          }});
+        }}
+      }}
+
+      function draw() {{
+        ctx.fillStyle = "rgba(22, 18, 44, 0.16)";
+        ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+        for (let i = fireworks.length - 1; i >= 0; i -= 1) {{
+          const firework = fireworks[i];
+          firework.y -= firework.speed;
+          ctx.beginPath();
+          ctx.arc(firework.x, firework.y, 2.4, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${{firework.hue}}, 100%, 74%, 0.95)`;
+          ctx.fill();
+          if (firework.y <= firework.targetY) {{
+            burst(firework);
+            fireworks.splice(i, 1);
+          }}
+        }}
+
+        for (let i = particles.length - 1; i >= 0; i -= 1) {{
+          const particle = particles[i];
+          particle.x += particle.vx;
+          particle.y += particle.vy;
+          particle.vy += 0.04;
+          particle.alpha -= 1 / particle.life;
+          ctx.beginPath();
+          ctx.arc(particle.x, particle.y, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${{particle.hue}}, 100%, 70%, ${{Math.max(particle.alpha, 0)}})`;
+          ctx.fill();
+          if (particle.alpha <= 0) {{
+            particles.splice(i, 1);
+          }}
+        }}
+
+        requestAnimationFrame(draw);
+      }}
+
+      resizeCanvas();
+      for (let i = 0; i < 3; i += 1) {{
+        setTimeout(launchFirework, i * 500);
+      }}
+      setInterval(launchFirework, 900);
+      window.addEventListener("resize", resizeCanvas);
+      draw();
+    </script>
+    """
+    st.html(easter_html, unsafe_allow_javascript=True)
+
+
 def main() -> None:
     st.set_page_config(
         page_title="100周年特設ページ 公開用",
@@ -1856,7 +2166,7 @@ def main() -> None:
 
     loading.empty()
 
-    if current_page not in {"home", "members", "workspace"}:
+    if current_page not in {"home", "members", "workspace", "easteregg"}:
         render_navigation_buttons(current_page)
 
     if current_page == "home":
@@ -1873,6 +2183,50 @@ def main() -> None:
         render_members_page()
     elif current_page == "workspace":
         render_workspace()
+    else:
+        st.warning("ページを開けませんでした。")
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="100周年特設ページ 公開用",
+        page_icon="100",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+    inject_style()
+    loading = show_loading_overlay()
+
+    init_db()
+    ensure_seed_data()
+    members = load_members()
+    init_session_state()
+
+    messages = load_normalized_list(STORAGE_KEYS["message"], "message")
+    minutes = load_normalized_list(STORAGE_KEYS["minutes"], "minutes")
+    current_page = get_current_page(st.session_state["member_authenticated"])
+
+    loading.empty()
+
+    if current_page not in {"home", "members", "workspace", "easteregg"}:
+        render_navigation_buttons(current_page)
+
+    if current_page == "home":
+        render_home(messages, minutes, members)
+    elif current_page == "message":
+        render_message_page(messages)
+    elif current_page == "minutes":
+        render_minutes_page(minutes)
+    elif current_page == "board":
+        render_public_board_page()
+    elif current_page == "voice":
+        render_project_voice_page()
+    elif current_page == "members":
+        render_members_page()
+    elif current_page == "workspace":
+        render_workspace()
+    elif current_page == "easteregg":
+        render_easter_egg_page()
     else:
         st.warning("ページを開けませんでした。")
 
