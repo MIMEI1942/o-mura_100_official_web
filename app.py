@@ -42,6 +42,8 @@ NAV_PAGES = [
 WORKSPACE_SECTION_LABELS = {
     "news": "100周年News",
     "minutes": "お知らせ",
+    "board": "掲示板",
+    "voice": "100周年プロジェクトへの声",
     "tasks": "タスク",
     "planning": "企画立案",
 }
@@ -64,6 +66,15 @@ SHARED_LOGIN_PASSWORD = "39_oomura"
 SHARED_AUTHOR_NAME = "100周年プロジェクト"
 AUTH_QUERY_VALUE = "member"
 CEREMONY_DATE = date(2026, 10, 11)
+DEPARTMENT_OPTIONS = [
+    "株式会社オームラ営業部",
+    "株式会社オームラアフター法要部",
+    "株式会社オームラ営業事務部",
+    "株式会社エンバーミングサービス",
+    "一般社団法人ふくい身元保証サービスおりづる",
+    "ききょう商事有限会社",
+]
+VOICE_STATUS_OPTIONS = ["未確認", "確認中", "対応予定", "対応済み"]
 
 DEFAULT_MEMBERS = [
     {"id": "m1", "name": "牧野", "role": "プロジェクトリーダー", "dept": "100周年プロジェクト"},
@@ -267,6 +278,72 @@ def load_normalized_list(key: str, prefix: str) -> list[dict]:
     return normalized
 
 
+def load_board_rows() -> list[dict]:
+    rows = load_normalized_list(STORAGE_KEYS["board"], "board")
+    normalized = []
+    changed = False
+    for item in rows:
+        row = dict(item)
+        if "parentId" not in row:
+            row["parentId"] = ""
+            changed = True
+        normalized.append(row)
+    if changed:
+        save_json(STORAGE_KEYS["board"], normalized)
+    return normalized
+
+
+def load_voice_rows() -> list[dict]:
+    rows = load_normalized_list(STORAGE_KEYS["voice"], "voice")
+    normalized = []
+    changed = False
+    for item in rows:
+        row = dict(item)
+        if not row.get("status"):
+            row["status"] = VOICE_STATUS_OPTIONS[0]
+            changed = True
+        if "responseMemo" not in row:
+            row["responseMemo"] = ""
+            changed = True
+        normalized.append(row)
+    if changed:
+        save_json(STORAGE_KEYS["voice"], normalized)
+    return normalized
+
+
+def board_parent_id(item: dict) -> str:
+    return str(item.get("parentId", "") or "").strip()
+
+
+def board_reply_map(rows: list[dict]) -> dict[str, list[dict]]:
+    replies: dict[str, list[dict]] = {}
+    for item in rows:
+        parent_id = board_parent_id(item)
+        if parent_id:
+            replies.setdefault(parent_id, []).append(item)
+    for parent_id in replies:
+        replies[parent_id] = sorted_entries(replies[parent_id], reverse=False)
+    return replies
+
+
+def render_board_entry_card(item: dict, key_prefix: str, indent: bool = False) -> None:
+    wrapper_style = "margin-left:1.1rem;padding-left:0.95rem;border-left:3px solid rgba(122,103,199,0.22);" if indent else ""
+    st.markdown(
+        f"""
+        <div style="{wrapper_style}">
+          <div class="entry-card">
+            <div class="entry-head">
+              <div class="entry-title">{escape_html(item.get("name", "匿名"))}</div>
+              <div class="entry-meta">{escape_html(format_dt(item.get("createdAt")))}</div>
+            </div>
+            <div class="entry-body">{escape_html(item.get("text", ""))}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def launched_via_streamlit() -> bool:
     try:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
@@ -279,6 +356,7 @@ def launched_via_streamlit() -> bool:
 def init_session_state() -> None:
     st.session_state.setdefault("member_authenticated", False)
     st.session_state.setdefault("member_password_input", "")
+    st.session_state.setdefault("voice_submit_success", False)
     auth_value = st.query_params.get("auth", "")
     if isinstance(auth_value, list):
         auth_value = auth_value[0] if auth_value else ""
@@ -672,17 +750,12 @@ def show_loading_overlay():
 
 
 def render_navigation_buttons(current_page: str) -> None:
-    auth_input = f'<input type="hidden" name="auth" value="{AUTH_QUERY_VALUE}">' if st.session_state.get("member_authenticated") else ""
     items = []
     for slug, label in NAV_PAGES:
         active = " is-active" if slug == current_page else ""
         items.append(
             f"""
-            <form class="top-nav-form" method="get" action="">
-              <input type="hidden" name="page" value="{slug}">
-              {auth_input}
-              <button class="top-nav-button{active}" type="submit">{escape_html(label)}</button>
-            </form>
+            <button class="top-nav-button{active}" type="button" data-href="{build_page_href(slug)}">{escape_html(label)}</button>
             """
         )
     st.html(
@@ -730,6 +803,15 @@ def render_navigation_buttons(current_page: str) -> None:
         + "".join(items)
         + """
         </div>
+        <script>
+        document.querySelectorAll(".top-nav-button[data-href]").forEach((button) => {
+            if (button.dataset.bound === "true") return;
+            button.dataset.bound = "true";
+            button.addEventListener("click", () => {
+                window.location.assign(button.dataset.href);
+            });
+        });
+        </script>
         """,
         unsafe_allow_javascript=True,
     )
@@ -832,13 +914,33 @@ def render_member_login_shortcut() -> None:
 
 
 def render_project_voice_shortcut() -> None:
-    st.markdown(
+    st.html(
         f"""
+        <style>
+        .voice-shortcut-button {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            min-height: 48px;
+            border: 0;
+            cursor: pointer;
+        }}
+        </style>
         <div class="floating-shortcut right">
-          <a href="{build_page_href('voice')}">100周年プロジェクトへの声を投稿</a>
+          <button class="voice-shortcut-button" type="button" data-href="{build_page_href('voice')}">100周年プロジェクトへの声を投稿</button>
         </div>
+        <script>
+        document.querySelectorAll(".voice-shortcut-button[data-href]").forEach((button) => {{
+            if (button.dataset.bound === "true") return;
+            button.dataset.bound = "true";
+            button.addEventListener("click", () => {{
+                window.location.assign(button.dataset.href);
+            }});
+        }});
+        </script>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -915,19 +1017,12 @@ def render_board_posts(posts: list[dict]) -> None:
     if not posts:
         st.info("投稿はまだありません。")
         return
-    for item in sorted_entries(posts):
-        st.markdown(
-            f"""
-            <div class="entry-card">
-              <div class="entry-head">
-                <div class="entry-title">{escape_html(item.get("name", "匿名"))}</div>
-                <div class="entry-meta">{escape_html(format_dt(item.get("createdAt")))}</div>
-              </div>
-              <div class="entry-body">{escape_html(item.get("text", ""))}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    replies = board_reply_map(posts)
+    top_level = [item for item in sorted_entries(posts) if not board_parent_id(item)]
+    for item in top_level:
+        render_board_entry_card(item, "board_root")
+        for reply in replies.get(item.get("id", ""), []):
+            render_board_entry_card(reply, "board_reply", indent=True)
 
 
 def add_post_entry(key: str, text: str, uploaded_file) -> None:
@@ -1228,30 +1323,18 @@ def render_home_hero() -> None:
               <div class="countdown-date">2026年10月11日</div>
             </div>
             <div class="menu-grid">
-              <form class="menu-card-form" method="get" action="" target="_top">
-                <input type="hidden" name="page" value="message">
-                {auth_input}
-                <button class="menu-card" type="submit">
-                  <strong>100周年News</strong>
-                  <span>100周年に関する最新トピックをまとめて確認します。</span>
-                </button>
-              </form>
-              <form class="menu-card-form" method="get" action="" target="_top">
-                <input type="hidden" name="page" value="minutes">
-                {auth_input}
-                <button class="menu-card" type="submit">
-                  <strong>お知らせ</strong>
-                  <span>共有事項や添付資料を時系列で確認できます。</span>
-                </button>
-              </form>
-              <form class="menu-card-form" method="get" action="" target="_top">
-                <input type="hidden" name="page" value="board">
-                {auth_input}
-                <button class="menu-card" type="submit">
-                  <strong>掲示板</strong>
-                  <span>社員同士で自由にコメントし合える公開掲示板です。</span>
-                </button>
-              </form>
+              <button class="menu-card" type="button" data-href="{build_page_href('message')}">
+                <strong>100周年News</strong>
+                <span>100周年に関する最新トピックをまとめて確認します。</span>
+              </button>
+              <button class="menu-card" type="button" data-href="{build_page_href('minutes')}">
+                <strong>お知らせ</strong>
+                <span>共有事項や添付資料を時系列で確認できます。</span>
+              </button>
+              <button class="menu-card" type="button" data-href="{build_page_href('board')}">
+                <strong>掲示板</strong>
+                <span>社員同士で自由にコメントし合える公開掲示板です。</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1341,12 +1424,20 @@ def render_home_hero() -> None:
         hero.classList.remove("hero-easter-ready");
       }}
 
+      document.querySelectorAll(".menu-card[data-href]").forEach((button) => {{
+        if (button.dataset.bound === "true") return;
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {{
+          window.location.assign(button.dataset.href);
+        }});
+      }});
+
       if (memberLoginLogo) {{
         memberLoginLogo.addEventListener("click", () => {{
           loginClickCount += 1;
           if (loginClickTimer) window.clearTimeout(loginClickTimer);
           if (loginClickCount >= 3) {{
-            window.location.href = memberLoginLogo.dataset.target;
+            window.location.assign(memberLoginLogo.dataset.target);
             return;
           }}
           loginClickTimer = window.setTimeout(() => {{
@@ -1372,7 +1463,7 @@ def render_home_hero() -> None:
           easterClickCount += 1;
           if (easterClickTimer) window.clearTimeout(easterClickTimer);
           if (easterClickCount >= 3) {{
-            window.location.href = "{build_page_href('easteregg')}";
+            window.location.assign("{build_page_href('easteregg')}");
             return;
           }}
           easterClickTimer = window.setTimeout(() => {{
@@ -1425,50 +1516,79 @@ def render_public_board_page() -> None:
     render_project_voice_shortcut()
     st.markdown('<div class="section-title">掲示板</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-copy">社員同士で自由にコメントできる公開掲示板です。</div>', unsafe_allow_html=True)
-    rows = load_normalized_list(STORAGE_KEYS["board"], "board")
-    with st.form("public_board_form", clear_on_submit=True):
-        name = st.text_input("投稿者名")
-        text = st.text_area("コメント", height=160)
-        submitted = st.form_submit_button("投稿する")
-    if submitted:
-        if not name.strip() or not text.strip():
-            st.error("投稿者名とコメントを入力してください。")
-        else:
-            rows.append({"id": make_id("board"), "name": name.strip(), "text": text.strip(), "createdAt": now_iso()})
-            save_json(STORAGE_KEYS["board"], rows)
+    rows = load_board_rows()
+    reply_target_id = st.session_state.get("board_reply_target_id", "")
+    reply_target = next((item for item in rows if item.get("id") == reply_target_id and not board_parent_id(item)), None)
+    if reply_target:
+        reply_cols = st.columns([5, 1])
+        reply_cols[0].info(f"返信先: {reply_target.get('name', '')} / {reply_target.get('text', '')}")
+        if reply_cols[1].button("解除", key="clear_board_reply_target", width="stretch"):
+            st.session_state["board_reply_target_id"] = ""
             st.rerun()
-    render_board_posts(load_normalized_list(STORAGE_KEYS["board"], "board"))
+    with st.form("public_board_form", clear_on_submit=True):
+        name = st.selectbox("部署", DEPARTMENT_OPTIONS)
+        text = st.text_area("コメント", height=160)
+        submitted = st.form_submit_button("返信する" if reply_target else "投稿する")
+    if submitted:
+        if not text.strip():
+            st.error("部署とコメントを入力してください。")
+        else:
+            rows.append(
+                {
+                    "id": make_id("board"),
+                    "name": name.strip(),
+                    "text": text.strip(),
+                    "parentId": reply_target.get("id", "") if reply_target else "",
+                    "createdAt": now_iso(),
+                }
+            )
+            save_json(STORAGE_KEYS["board"], rows)
+            st.session_state["board_reply_target_id"] = ""
+            st.rerun()
+    replies = board_reply_map(load_board_rows())
+    top_level = [item for item in sorted_entries(load_board_rows()) if not board_parent_id(item)]
+    if not top_level:
+        st.info("投稿はまだありません。")
+        return
+    for item in top_level:
+        render_board_entry_card(item, "board_public")
+        action_cols = st.columns([1, 5])
+        if action_cols[0].button("返信", key=f"reply_board_{item.get('id')}", width="stretch"):
+            st.session_state["board_reply_target_id"] = item.get("id", "")
+            st.rerun()
+        for reply in replies.get(item.get("id", ""), []):
+            render_board_entry_card(reply, "board_public_reply", indent=True)
 
 
 def render_project_voice_page() -> None:
     render_member_login_shortcut()
     st.markdown('<div class="section-title">100周年プロジェクトへの声</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-copy">100周年プロジェクトへの意見や提案を送るフォームです。</div>', unsafe_allow_html=True)
-    voices = load_normalized_list(STORAGE_KEYS["voice"], "voice")
+    if st.session_state.get("voice_submit_success"):
+        st.success("送信が完了しました。")
+        st.session_state["voice_submit_success"] = False
+    voices = load_voice_rows()
     with st.form("project_voice_form", clear_on_submit=True):
-        author = st.text_input("投稿者名または部署名")
+        author = st.selectbox("部署", DEPARTMENT_OPTIONS)
         text = st.text_area("メッセージ", height=180)
         submitted = st.form_submit_button("送信する")
     if submitted:
-        if not author.strip() or not text.strip():
-            st.error("投稿者名または部署名とメッセージを入力してください。")
+        if not text.strip():
+            st.error("部署とメッセージを入力してください。")
         else:
-            voices.append({"id": make_id("voice"), "author": author.strip(), "text": text.strip(), "createdAt": now_iso()})
+            voices.append(
+                {
+                    "id": make_id("voice"),
+                    "author": author.strip(),
+                    "text": text.strip(),
+                    "status": VOICE_STATUS_OPTIONS[0],
+                    "responseMemo": "",
+                    "createdAt": now_iso(),
+                }
+            )
             save_json(STORAGE_KEYS["voice"], voices)
+            st.session_state["voice_submit_success"] = True
             st.rerun()
-    for item in sorted_entries(load_normalized_list(STORAGE_KEYS["voice"], "voice")):
-        st.markdown(
-            f"""
-            <div class="entry-card">
-              <div class="entry-head">
-                <div class="entry-title">{escape_html(item.get("author", "匿名"))}</div>
-                <div class="entry-meta">{escape_html(format_dt(item.get("createdAt")))}</div>
-              </div>
-              <div class="entry-body">{escape_html(item.get("text", ""))}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
 
 def render_task_map(tasks: list[dict]) -> None:
@@ -1496,7 +1616,7 @@ def render_task_map(tasks: list[dict]) -> None:
         .task-map-cell { position: relative; border: 1px solid rgba(122, 103, 199, 0.18); border-radius: 20px; background: rgba(255, 255, 255, 0.72); padding: 1rem; box-shadow: 0 14px 34px rgba(70, 60, 110, 0.08); overflow: visible; }
         .task-map-cell h4 { margin: 0 0 0.75rem; color: var(--ink); font-size: 0.98rem; }
         .task-map-items { display: flex; flex-wrap: wrap; gap: 0.7rem; }
-        .task-map-item { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 9.2rem; max-width: 100%; padding: 0.78rem 0.9rem; border-radius: 16px; background: linear-gradient(135deg, rgba(122, 103, 199, 0.96), rgba(89, 123, 202, 0.95)); color: #fff; text-decoration: none; font-weight: 700; line-height: 1.35; box-shadow: 0 12px 26px rgba(71, 63, 132, 0.18); overflow: visible; z-index: 1; }
+        .task-map-item { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 9.2rem; max-width: 100%; padding: 0.78rem 0.9rem; border-radius: 16px; border: 0; background: linear-gradient(135deg, rgba(122, 103, 199, 0.96), rgba(89, 123, 202, 0.95)); color: #fff; text-decoration: none; font-weight: 700; line-height: 1.35; box-shadow: 0 12px 26px rgba(71, 63, 132, 0.18); overflow: visible; z-index: 1; cursor: pointer; appearance: none; -webkit-appearance: none; }
         .task-map-item-due-soon { background: linear-gradient(135deg, rgba(205, 69, 69, 0.98), rgba(235, 130, 78, 0.96)); box-shadow: 0 16px 34px rgba(198, 92, 61, 0.26); outline: 2px solid rgba(255, 224, 173, 0.92); }
         .task-map-item:hover { transform: translateY(-2px); z-index: 30; }
         .task-map-item-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -1578,11 +1698,11 @@ def render_task_map(tasks: list[dict]) -> None:
                 )
                 html_parts.append(
                     f"""
-                    <a class="{item_class}" href="{make_workspace_href('tasks', 'task_id', item.get('id', ''))}" target="_self">
+                    <button class="{item_class}" type="button" data-href="{make_workspace_href('tasks', 'task_id', item.get('id', ''))}">
                       {badge_html}
                       <span class="task-map-item-label">{escape_html(item.get("text", ""))}</span>
                       <span class="task-map-tooltip">{tooltip}</span>
-                    </a>
+                    </button>
                     """
                 )
         else:
@@ -1597,6 +1717,15 @@ def render_task_map(tasks: list[dict]) -> None:
             </div>
           </div>
         </div>
+        <script>
+        document.querySelectorAll(".task-map-item[data-href]").forEach((button) => {
+            if (button.dataset.bound === "true") return;
+            button.dataset.bound = "true";
+            button.addEventListener("click", () => {
+                window.location.assign(button.dataset.href);
+            });
+        });
+        </script>
         """
     )
     st.html("".join(html_parts))
@@ -1610,18 +1739,33 @@ def render_plan_links(plans: list[dict]) -> None:
     for item in plans:
         cards.append(
             f"""
-            <a href="{make_workspace_href('planning', 'plan_id', item.get('id', ''))}"
-               style="display:block;text-decoration:none;padding:1rem 1.05rem;border-radius:18px;background:rgba(255,255,255,0.78);border:1px solid rgba(122,103,199,0.16);box-shadow:0 12px 28px rgba(70,60,110,0.08);color:var(--ink);">
+            <button type="button"
+               class="plan-link-card"
+               data-href="{make_workspace_href('planning', 'plan_id', item.get('id', ''))}"
+               style="display:block;width:100%;text-align:left;padding:1rem 1.05rem;border-radius:18px;border:1px solid rgba(122,103,199,0.16);background:rgba(255,255,255,0.78);box-shadow:0 12px 28px rgba(70,60,110,0.08);color:var(--ink);cursor:pointer;">
               <div style="font-weight:700;margin-bottom:0.4rem;">{escape_html(item.get("title", ""))}</div>
               <div style="font-size:0.88rem;color:var(--muted);margin-bottom:0.55rem;">提案者: {escape_html(item.get("proposer", ""))}</div>
               <div style="font-size:0.92rem;line-height:1.55;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">
                 {escape_html(item.get("description", ""))}
               </div>
-            </a>
+            </button>
             """
         )
     cards.append("</div>")
-    st.markdown("".join(cards), unsafe_allow_html=True)
+    cards.append(
+        """
+        <script>
+        document.querySelectorAll(".plan-link-card[data-href]").forEach((button) => {
+            if (button.dataset.bound === "true") return;
+            button.dataset.bound = "true";
+            button.addEventListener("click", () => {
+                window.location.assign(button.dataset.href);
+            });
+        });
+        </script>
+        """
+    )
+    st.html("".join(cards), unsafe_allow_javascript=True)
 
 
 def render_members_page() -> None:
@@ -1775,6 +1919,84 @@ def render_workspace() -> None:
             if st.button("削除", key=f"del_minutes_{item.get('id')}", width="stretch"):
                 save_json(STORAGE_KEYS["minutes"], [row for row in rows if row.get("id") != item.get("id")])
                 navigate_to("workspace", section="minutes")
+
+    elif selected_section == "board":
+        rows = load_board_rows()
+        replies = board_reply_map(rows)
+        top_level = [item for item in sorted_entries(rows) if not board_parent_id(item)]
+        if not top_level:
+            st.info("掲示板の投稿はまだありません。")
+        for item in top_level:
+            render_board_entry_card(item, "admin_board")
+            action_cols = st.columns([1, 1, 4])
+            if action_cols[0].button("返信一覧", key=f"open_board_thread_{item.get('id')}", width="stretch"):
+                st.session_state["workspace_board_open_id"] = item.get("id", "")
+            if action_cols[1].button("削除", key=f"del_board_root_{item.get('id')}", width="stretch"):
+                target_id = item.get("id")
+                save_json(
+                    STORAGE_KEYS["board"],
+                    [row for row in rows if row.get("id") != target_id and board_parent_id(row) != target_id],
+                )
+                navigate_to("workspace", section="board")
+
+            if st.session_state.get("workspace_board_open_id") == item.get("id"):
+                thread_replies = replies.get(item.get("id", ""), [])
+                if not thread_replies:
+                    st.caption("返信はまだありません。")
+                for reply in thread_replies:
+                    render_board_entry_card(reply, "admin_board_reply", indent=True)
+                    reply_cols = st.columns([1, 5])
+                    if reply_cols[0].button("削除", key=f"del_board_reply_{reply.get('id')}", width="stretch"):
+                        save_json(STORAGE_KEYS["board"], [row for row in rows if row.get("id") != reply.get("id")])
+                        navigate_to("workspace", section="board")
+
+    elif selected_section == "voice":
+        voices = sorted_entries(load_voice_rows())
+        if not voices:
+            st.info("100周年プロジェクトへの声はまだありません。")
+        for item in voices:
+            st.markdown(
+                f"""
+                <div class="entry-card">
+                  <div class="entry-head">
+                    <div class="entry-title">{escape_html(item.get("author", "未設定"))}</div>
+                    <div class="entry-meta">{escape_html(format_dt(item.get("createdAt")))}</div>
+                  </div>
+                  <div class="entry-body">{escape_html(item.get("text", ""))}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.form(f"voice_manage_{item.get('id')}"):
+                cols = st.columns([1, 2])
+                current_status = item.get("status", VOICE_STATUS_OPTIONS[0])
+                if current_status not in VOICE_STATUS_OPTIONS:
+                    current_status = VOICE_STATUS_OPTIONS[0]
+                status = cols[0].selectbox(
+                    "対応状況",
+                    VOICE_STATUS_OPTIONS,
+                    index=VOICE_STATUS_OPTIONS.index(current_status),
+                    key=f"voice_status_{item.get('id')}",
+                )
+                memo = cols[1].text_area(
+                    "対応メモ",
+                    value=item.get("responseMemo", ""),
+                    height=120,
+                    key=f"voice_memo_{item.get('id')}",
+                )
+                form_cols = st.columns([1, 1, 4])
+                updated = form_cols[0].form_submit_button("更新")
+                deleted = form_cols[1].form_submit_button("削除")
+            if updated:
+                for row in voices:
+                    if row.get("id") == item.get("id"):
+                        row["status"] = status
+                        row["responseMemo"] = memo.strip()
+                save_json(STORAGE_KEYS["voice"], voices)
+                navigate_to("workspace", section="voice")
+            if deleted:
+                save_json(STORAGE_KEYS["voice"], [row for row in voices if row.get("id") != item.get("id")])
+                navigate_to("workspace", section="voice")
 
     elif selected_section == "tasks":
         tasks = load_normalized_list(STORAGE_KEYS["tasks"], "task")
