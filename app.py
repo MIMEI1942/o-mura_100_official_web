@@ -261,7 +261,14 @@ def get_raw_value(key: str) -> str | None:
     return row[0] if row else None
 
 
-@st.cache_data(ttl=10, show_spinner=False)
+@st.cache_data(ttl=86400, show_spinner=False)
+def bootstrap_storage_for_day(day_key: str) -> str:
+    init_db()
+    ensure_seed_data()
+    return day_key
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
 def load_json_cached(key: str, fallback_json: str):
     raw = get_raw_value(key)
     if raw is None:
@@ -310,6 +317,11 @@ def load_json(key: str, fallback: list | dict | None = None):
 def save_json(key: str, value) -> None:
     set_raw_value(key, json.dumps(value, ensure_ascii=False))
     load_json_cached.clear()
+
+
+def clear_data_caches() -> None:
+    load_json_cached.clear()
+    bootstrap_storage_for_day.clear()
 
 
 def load_members() -> list[dict]:
@@ -912,6 +924,13 @@ def render_navigation_buttons(current_page: str) -> None:
         """,
         unsafe_allow_javascript=True,
     )
+
+
+def render_refresh_button() -> None:
+    cols = st.columns([6, 1.2])
+    if cols[1].button("情報更新", key=f"refresh_info_{query_param_value('page', 'home')}", width="stretch"):
+        clear_data_caches()
+        st.rerun()
 
 
 def render_member_login_shortcut() -> None:
@@ -1579,7 +1598,7 @@ def render_home_hero() -> None:
     st.html(hero_html, unsafe_allow_javascript=True)
 
 
-def render_home(messages: list[dict], minutes: list[dict], members: list[dict]) -> None:
+def render_home() -> None:
     render_project_voice_shortcut()
     render_home_hero()
 
@@ -2474,25 +2493,25 @@ def main() -> None:
     inject_style()
     loading = show_loading_overlay()
 
-    init_db()
-    ensure_seed_data()
-    members = load_members()
     init_session_state()
-
-    messages = load_normalized_list(STORAGE_KEYS["message"], "message")
-    minutes = load_normalized_list(STORAGE_KEYS["minutes"], "minutes")
+    bootstrap_storage_for_day(jst_now().date().isoformat())
     current_page = get_current_page(st.session_state["member_authenticated"])
 
     loading.empty()
 
     if current_page not in {"home", "members", "workspace", "easteregg"}:
         render_navigation_buttons(current_page)
+        render_refresh_button()
+    elif current_page in {"members", "workspace"}:
+        render_refresh_button()
 
     if current_page == "home":
-        render_home(messages, minutes, members)
+        render_home()
     elif current_page == "message":
+        messages = load_normalized_list(STORAGE_KEYS["message"], "message")
         render_message_page(messages)
     elif current_page == "minutes":
+        minutes = load_normalized_list(STORAGE_KEYS["minutes"], "minutes")
         render_minutes_page(minutes)
     elif current_page == "board":
         render_public_board_page()
