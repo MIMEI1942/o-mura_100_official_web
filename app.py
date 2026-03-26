@@ -261,6 +261,17 @@ def get_raw_value(key: str) -> str | None:
     return row[0] if row else None
 
 
+@st.cache_data(ttl=10, show_spinner=False)
+def load_json_cached(key: str, fallback_json: str):
+    raw = get_raw_value(key)
+    if raw is None:
+        return json.loads(fallback_json)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return json.loads(fallback_json)
+
+
 def set_raw_value(key: str, value: str) -> None:
     if using_external_db():
         with DB_LOCK, connect_external_db() as conn:
@@ -292,17 +303,13 @@ def set_raw_value(key: str, value: str) -> None:
 
 
 def load_json(key: str, fallback: list | dict | None = None):
-    raw = get_raw_value(key)
-    if raw is None:
-        return [] if fallback is None else fallback
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return [] if fallback is None else fallback
+    default_value = [] if fallback is None else fallback
+    return load_json_cached(key, json.dumps(default_value, ensure_ascii=False))
 
 
 def save_json(key: str, value) -> None:
     set_raw_value(key, json.dumps(value, ensure_ascii=False))
+    load_json_cached.clear()
 
 
 def load_members() -> list[dict]:
@@ -1635,8 +1642,8 @@ def render_public_board_page() -> None:
             save_json(STORAGE_KEYS["board"], rows)
             st.session_state["board_reply_target_id"] = ""
             st.rerun()
-    replies = board_reply_map(load_board_rows())
-    top_level = [item for item in sorted_entries(load_board_rows()) if not board_parent_id(item)]
+    replies = board_reply_map(rows)
+    top_level = [item for item in sorted_entries(rows) if not board_parent_id(item)]
     if not top_level:
         st.info("投稿はまだありません。")
         return
@@ -2455,48 +2462,6 @@ def render_easter_egg_page() -> None:
     </script>
     """
     st.html(easter_html, unsafe_allow_javascript=True)
-
-
-def main() -> None:
-    st.set_page_config(
-        page_title="100周年特設ページ 公開用",
-        page_icon="100",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-    )
-    inject_style()
-    loading = show_loading_overlay()
-
-    init_db()
-    ensure_seed_data()
-    members = load_members()
-    init_session_state()
-
-    messages = load_normalized_list(STORAGE_KEYS["message"], "message")
-    minutes = load_normalized_list(STORAGE_KEYS["minutes"], "minutes")
-    current_page = get_current_page(st.session_state["member_authenticated"])
-
-    loading.empty()
-
-    if current_page not in {"home", "members", "workspace", "easteregg"}:
-        render_navigation_buttons(current_page)
-
-    if current_page == "home":
-        render_home(messages, minutes, members)
-    elif current_page == "message":
-        render_message_page(messages)
-    elif current_page == "minutes":
-        render_minutes_page(minutes)
-    elif current_page == "board":
-        render_public_board_page()
-    elif current_page == "voice":
-        render_project_voice_page()
-    elif current_page == "members":
-        render_members_page()
-    elif current_page == "workspace":
-        render_workspace()
-    else:
-        st.warning("ページを開けませんでした。")
 
 
 def main() -> None:
