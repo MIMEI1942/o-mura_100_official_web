@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import html
+import importlib
 import json
 import os
 import sqlite3
@@ -132,6 +133,32 @@ SEED_DATA = {
 }
 
 
+def get_secret_or_env(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        secret_value = st.secrets.get(name, default)
+    except Exception:
+        return default
+    if isinstance(secret_value, str):
+        return secret_value
+    return default
+
+
+def external_database_url() -> str:
+    return get_secret_or_env("CENTENNIAL_DATABASE_URL") or get_secret_or_env("DATABASE_URL")
+
+
+def using_external_db() -> bool:
+    return bool(external_database_url())
+
+
+def connect_external_db():
+    psycopg = importlib.import_module("psycopg")
+    return psycopg.connect(external_database_url())
+
+
 def now_iso() -> str:
     return datetime.now(JST).replace(microsecond=0).isoformat()
 
@@ -166,7 +193,49 @@ def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
+def migrate_local_sqlite_to_external() -> None:
+    if not using_external_db() or not DB_PATH.exists():
+        return
+    with sqlite3.connect(DB_PATH) as local_conn:
+        rows = local_conn.execute("SELECT key, value, updated_at FROM kv_storage").fetchall()
+    if not rows:
+        return
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key FROM kv_storage")
+            existing = {row[0] for row in cur.fetchall()}
+            for key, value, updated_at in rows:
+                if key in existing:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO kv_storage(key, value, updated_at)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (key, value, updated_at),
+                )
+        conn.commit()
+
+
 def init_db() -> None:
+    if using_external_db():
+        with DB_LOCK, connect_external_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS kv_storage (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL
+                    )
+                    """
+                )
+            conn.commit()
+        migrate_local_sqlite_to_external()
+        return
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -181,12 +250,33 @@ def init_db() -> None:
 
 
 def get_raw_value(key: str) -> str | None:
+    if using_external_db():
+        with DB_LOCK, connect_external_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM kv_storage WHERE key = %s", (key,))
+                row = cur.fetchone()
+        return row[0] if row else None
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT value FROM kv_storage WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
 
 
 def set_raw_value(key: str, value: str) -> None:
+    if using_external_db():
+        with DB_LOCK, connect_external_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO kv_storage(key, value, updated_at)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (key, value, now_iso()),
+                )
+            conn.commit()
+        return
     with DB_LOCK, sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """

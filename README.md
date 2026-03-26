@@ -30,6 +30,40 @@ py app.py
 - 公開リポジトリへ内部データを直接載せない前提です
 - 初回起動時は `app.py` 内のシードデータから最低限の表示が立ち上がります
 
+## 永続DB設定
+
+このアプリは、`CENTENNIAL_DATABASE_URL` または `DATABASE_URL` が設定されている場合、ローカルの `storage.sqlite3` ではなく外部 PostgreSQL を使います。
+
+Streamlit Community Cloud では `App settings > Secrets` に次のように設定してください。
+
+```toml
+CENTENNIAL_DATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
+```
+
+- 外部DBが有効な場合、`kv_storage` テーブルを自動作成します
+- ローカルの `storage.sqlite3` に既存データがある場合は、外部DBにまだ同じキーがないときだけ初回起動時に取り込みます
+- 外部DB未設定時だけ、従来通りローカル `storage.sqlite3` を使います
+
+### Supabase で始める場合
+
+1. Supabase で `Free Plan` の organization を作る
+2. `New project` で 100周年用の project を 1つだけ作る
+3. project 作成後、画面上部の `Connect` から `Session pooler` の接続文字列をコピーする
+4. パスワード部分を project 作成時の DB パスワードに置き換える
+5. Streamlit Community Cloud の `App settings > Secrets` に [`.streamlit/secrets.example.toml`](C:/ブラウザ用アプリ/100周年特設ページ_公開用/.streamlit/secrets.example.toml) の形で貼る
+6. 再デプロイする
+
+このアプリでは、接続先として `Session pooler` を使う前提にしています。
+
+### 無料枠を超えにくくする運用
+
+- Supabase は `Free Plan` のまま使う
+- project は 1つに絞る
+- `Storage`、`Auth`、`Realtime`、`Edge Functions` はこのアプリでは使わない
+- 添付ファイルは今まで通りアプリ側のデータ URL 保存なので、Supabase Storage へ上げない
+- DB サイズは `500 MB` を超えないようにする
+- 長期間アクセスがないと free project は pause されうるので、必要時は Dashboard から resume する
+
 ## GitHub への載せ方
 
 この PC では現時点で `git` コマンドが使えないため、次のどちらかが必要です。
