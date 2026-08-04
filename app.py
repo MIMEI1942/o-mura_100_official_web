@@ -250,7 +250,7 @@ def ensure_message_posts_table() -> None:
         conn.commit()
 
 
-def migrate_message_posts_to_table() -> None:
+
     """旧kv_storageの巨大JSONを、DB内で1投稿1行へ安全にコピーする。
 
     旧データは削除も上書きもしない。移行済みIDはON CONFLICTで無視するため、
@@ -344,7 +344,6 @@ def init_db() -> None:
                 )
             conn.commit()
         ensure_message_posts_table()
-        migrate_message_posts_to_table()
         migrate_local_sqlite_to_external()
         return
     with sqlite3.connect(DB_PATH) as conn:
