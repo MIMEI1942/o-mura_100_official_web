@@ -249,13 +249,6 @@ def ensure_message_posts_table() -> None:
             )
         conn.commit()
 
-
-
-    """旧kv_storageの巨大JSONを、DB内で1投稿1行へ安全にコピーする。
-
-    旧データは削除も上書きもしない。移行済みIDはON CONFLICTで無視するため、
-    途中で止まっても次回起動時に続きから再実行できる。
-    """
     if not using_external_db():
         return
     migration_key = "centennial_message_posts_table_migrated_v1"
