@@ -156,7 +156,10 @@ def using_external_db() -> bool:
 
 def connect_external_db():
     psycopg = importlib.import_module("psycopg")
-    return psycopg.connect(external_database_url())
+    return psycopg.connect(
+        external_database_url(),
+        connect_timeout=15,
+    )
 
 
 def now_iso() -> str:
@@ -220,6 +223,112 @@ def migrate_local_sqlite_to_external() -> None:
         conn.commit()
 
 
+def ensure_message_posts_table() -> None:
+    """100周年Newsを1投稿1行で保存する専用テーブルを用意する。"""
+    if not using_external_db():
+        return
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS public.centennial_message_posts (
+                    id TEXT PRIMARY KEY,
+                    body TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    file_name TEXT,
+                    file_type TEXT,
+                    file_data TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_centennial_message_posts_created_at
+                ON public.centennial_message_posts (created_at DESC)
+                """
+            )
+        conn.commit()
+
+
+def migrate_message_posts_to_table() -> None:
+    """旧kv_storageの巨大JSONを、DB内で1投稿1行へ安全にコピーする。
+
+    旧データは削除も上書きもしない。移行済みIDはON CONFLICTで無視するため、
+    途中で止まっても次回起動時に続きから再実行できる。
+    """
+    if not using_external_db():
+        return
+    migration_key = "centennial_message_posts_table_migrated_v1"
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT value FROM public.kv_storage WHERE key = %s",
+                (migration_key,),
+            )
+            marker = cur.fetchone()
+            if marker and marker[0] == "done":
+                return
+
+            cur.execute(
+                """
+                SELECT 1
+                FROM public.kv_storage
+                WHERE key = %s
+                  AND value IS NOT NULL
+                  AND left(ltrim(value), 1) = '['
+                """,
+                (STORAGE_KEYS["message"],),
+            )
+            if cur.fetchone() is None:
+                return
+
+            cur.execute(
+                """
+                INSERT INTO public.centennial_message_posts (
+                    id,
+                    body,
+                    created_at,
+                    file_name,
+                    file_type,
+                    file_data
+                )
+                SELECT
+                    COALESCE(
+                        NULLIF(item ->> 'id', ''),
+                        'post_' || md5(item::text)
+                    ) AS id,
+                    COALESCE(item ->> 'text', '') AS body,
+                    COALESCE(
+                        NULLIF(item ->> 'createdAt', '')::timestamptz,
+                        NOW()
+                    ) AS created_at,
+                    NULLIF(item ->> 'fileName', '') AS file_name,
+                    CASE
+                        WHEN item ->> 'fileDataUrl' LIKE 'data:%;base64,%'
+                        THEN split_part(split_part(item ->> 'fileDataUrl', ';', 1), ':', 2)
+                        ELSE NULL
+                    END AS file_type,
+                    NULLIF(item ->> 'fileDataUrl', '') AS file_data
+                FROM public.kv_storage AS store
+                CROSS JOIN LATERAL jsonb_array_elements(store.value::jsonb) AS item
+                WHERE store.key = %s
+                ON CONFLICT (id) DO NOTHING
+                """,
+                (STORAGE_KEYS["message"],),
+            )
+            cur.execute(
+                """
+                INSERT INTO public.kv_storage(key, value, updated_at)
+                VALUES (%s, 'done', %s)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (migration_key, now_iso()),
+            )
+        conn.commit()
+
+
 def init_db() -> None:
     if using_external_db():
         with DB_LOCK, connect_external_db() as conn:
@@ -234,6 +343,8 @@ def init_db() -> None:
                     """
                 )
             conn.commit()
+        ensure_message_posts_table()
+        migrate_message_posts_to_table()
         migrate_local_sqlite_to_external()
         return
     with sqlite3.connect(DB_PATH) as conn:
@@ -1106,11 +1217,27 @@ def render_attachment_preview(data: bytes, mime: str, file_name: str, key_prefix
 
 
 def show_attachment(item: dict, key_prefix: str) -> None:
-    data, mime = decode_data_url(item.get("fileDataUrl"))
     file_name = item.get("fileName")
-    if data and file_name:
+    if not file_name:
+        return
+
+    data_url = item.get("fileDataUrl")
+    if item.get("_messageTable") and item.get("hasAttachment"):
+        post_id = str(item.get("id", ""))
         with st.expander(f"表示: {file_name}"):
-            render_attachment_preview(data, mime or "application/octet-stream", file_name, key_prefix, item.get("id", file_name))
+            if st.button("添付ファイルを読み込む", key=f"load_attachment_{key_prefix}_{post_id}"):
+                st.session_state[f"attachment_open_{post_id}"] = True
+            if st.session_state.get(f"attachment_open_{post_id}"):
+                with st.spinner("添付ファイルを読み込んでいます..."):
+                    data_url = load_message_attachment(post_id)
+
+    data, mime = decode_data_url(data_url)
+    if data:
+        if item.get("_messageTable"):
+            render_attachment_preview(data, mime or item.get("fileType") or "application/octet-stream", file_name, key_prefix, item.get("id", file_name))
+        else:
+            with st.expander(f"表示: {file_name}"):
+                render_attachment_preview(data, mime or "application/octet-stream", file_name, key_prefix, item.get("id", file_name))
 
 
 def render_entry(item: dict, title: str, meta: str, key_prefix: str) -> None:
@@ -1139,6 +1266,106 @@ def render_board_posts(posts: list[dict]) -> None:
         render_board_entry_card(item, "board_root")
         for reply in replies.get(item.get("id", ""), []):
             render_board_entry_card(reply, "board_reply", indent=True)
+
+
+def load_message_posts() -> list[dict]:
+    """100周年Newsを専用テーブルから取得する。添付本体は必要時のみ読む。"""
+    if not using_external_db():
+        return load_normalized_list(STORAGE_KEYS["message"], "message")
+
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    body,
+                    created_at,
+                    file_name,
+                    file_type,
+                    (file_data IS NOT NULL AND file_data <> '') AS has_attachment
+                FROM public.centennial_message_posts
+                ORDER BY created_at DESC
+                """
+            )
+            records = cur.fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "text": row[1],
+            "createdAt": row[2].astimezone(JST).isoformat() if row[2] else "",
+            "fileName": row[3],
+            "fileType": row[4],
+            "hasAttachment": bool(row[5]),
+            "_messageTable": True,
+        }
+        for row in records
+    ]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_message_attachment(post_id: str) -> str | None:
+    """指定した投稿の添付データだけを取得する。"""
+    if not using_external_db():
+        rows = load_normalized_list(STORAGE_KEYS["message"], "message")
+        item = next((row for row in rows if row.get("id") == post_id), None)
+        return item.get("fileDataUrl") if item else None
+
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT file_data
+                FROM public.centennial_message_posts
+                WHERE id = %s
+                """,
+                (post_id,),
+            )
+            row = cur.fetchone()
+    return row[0] if row else None
+
+
+def add_message_post(text: str, uploaded_file) -> None:
+    """100周年Newsを1件だけ追加する。"""
+    if not using_external_db():
+        add_post_entry(STORAGE_KEYS["message"], text, uploaded_file)
+        return
+
+    file_name, file_data_url = upload_to_data_url(uploaded_file)
+    file_type = uploaded_file.type if uploaded_file else None
+    post_id = make_id("post")
+
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO public.centennial_message_posts (
+                    id, body, created_at, file_name, file_type, file_data
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (post_id, text.strip(), now_iso(), file_name, file_type, file_data_url),
+            )
+        conn.commit()
+    load_message_attachment.clear()
+
+
+def delete_message_post(post_id: str) -> None:
+    """100周年Newsを1件だけ削除する。旧JSONバックアップは変更しない。"""
+    if not using_external_db():
+        rows = load_normalized_list(STORAGE_KEYS["message"], "message")
+        save_json(STORAGE_KEYS["message"], [row for row in rows if row.get("id") != post_id])
+        return
+
+    with DB_LOCK, connect_external_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM public.centennial_message_posts WHERE id = %s",
+                (post_id,),
+            )
+        conn.commit()
+    load_message_attachment.clear()
 
 
 def add_post_entry(key: str, text: str, uploaded_file) -> None:
@@ -2010,14 +2237,14 @@ def render_workspace() -> None:
             uploaded = st.file_uploader("添付ファイル", key="message_upload")
             submitted = st.form_submit_button("投稿する")
         if submitted and text.strip():
-            add_post_entry(STORAGE_KEYS["message"], text, uploaded)
+            add_message_post(text, uploaded)
             navigate_to("workspace", section="news")
 
-        rows = sorted_entries(load_normalized_list(STORAGE_KEYS["message"], "message"))
+        rows = load_message_posts()
         for item in rows:
             render_entry(item, "公開中の100周年News", format_dt(item.get("createdAt")), f"admin_message_{item.get('id')}")
             if st.button("削除", key=f"del_message_{item.get('id')}", width="stretch"):
-                save_json(STORAGE_KEYS["message"], [row for row in rows if row.get("id") != item.get("id")])
+                delete_message_post(str(item.get("id", "")))
                 navigate_to("workspace", section="news")
 
     elif selected_section == "minutes":
@@ -2508,7 +2735,7 @@ def main() -> None:
     if current_page == "home":
         render_home()
     elif current_page == "message":
-        messages = load_normalized_list(STORAGE_KEYS["message"], "message")
+        messages = load_message_posts()
         render_message_page(messages)
     elif current_page == "minutes":
         minutes = load_normalized_list(STORAGE_KEYS["minutes"], "minutes")
