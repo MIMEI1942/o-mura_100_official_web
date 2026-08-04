@@ -444,6 +444,52 @@ def load_members() -> list[dict]:
 
 
 def ensure_seed_data() -> None:
+    """初期データが存在しない場合だけ登録する。
+
+    外部DBでは値本体を読み込まず、キーの存在だけを確認する。
+    これにより、旧100周年Newsの約79MBデータを起動時に取得しない。
+    """
+    if using_external_db():
+        with DB_LOCK, connect_external_db() as conn:
+            with conn.cursor() as cur:
+                for key, value in SEED_DATA.items():
+                    # 100周年Newsは専用テーブルへ移行済みなので、
+                    # 旧kv_storageの巨大JSONを読み込まない。
+                    if key == STORAGE_KEYS["message"]:
+                        continue
+
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM public.kv_storage
+                        WHERE key = %s
+                        LIMIT 1
+                        """,
+                        (key,),
+                    )
+
+                    if cur.fetchone() is None:
+                        cur.execute(
+                            """
+                            INSERT INTO public.kv_storage (
+                                key,
+                                value,
+                                updated_at
+                            )
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (key) DO NOTHING
+                            """,
+                            (
+                                key,
+                                json.dumps(value, ensure_ascii=False),
+                                now_iso(),
+                            ),
+                        )
+
+            conn.commit()
+        return
+
+    # SQLite使用時は従来の処理
     for key, value in SEED_DATA.items():
         if get_raw_value(key) is None:
             save_json(key, value)
