@@ -1,5 +1,7 @@
 # 店舗写真アップロードフォーム
 
+> 設計資料: [要件定義書](docs/要件定義.md) / [システム設計書](docs/システム設計.md)
+
 写真と店舗名を投稿すると、
 
 1. Google Drive の指定フォルダ配下に **店舗名のサブフォルダ** を作って写真を保存し、
@@ -50,16 +52,28 @@ cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 
 すべて **環境変数でも指定できます**（環境変数が優先）。サービスアカウントの鍵は
 `GOOGLE_SERVICE_ACCOUNT_JSON`（JSON 文字列）または `GOOGLE_APPLICATION_CREDENTIALS`
-（ファイルパス）でも渡せるので、Streamlit Community Cloud などにデプロイする際は
-そちらを使ってください。
+（ファイルパス）でも渡せます。
 
 ### 3. 起動
+
+インターネットへの公開はせず、**社内の PC 1 台をローカルサーバにして** 同じ LAN 内から
+使う運用です。詳細は [`docs/要件定義.md`](docs/要件定義.md) と
+[`docs/システム設計.md`](docs/システム設計.md) を参照してください。
 
 ```bash
 cd apps/store_photo_uploader
 pip install -r requirements.txt
-streamlit run app.py
+streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
+
+Windows では `start.bat` をダブルクリックしても同じことができます
+（このPCのIPアドレスも表示されます）。
+
+- サーバ機からは http://localhost:8501
+- 同じ LAN 内の PC・スマートフォンからは `http://<サーバ機のIPアドレス>:8501`
+
+初回は Windows Defender ファイアウォールで **TCP 8501 の受信を許可** してください。
+止めるときはターミナルで `Ctrl + C`。
 
 ## 動作
 
@@ -90,3 +104,4 @@ python -m pytest apps/store_photo_uploader/tests
 | `google_services.py` | 認証と API クライアントの生成 |
 | `drive_uploader.py` | Drive へのフォルダ作成・アップロード・共有 |
 | `sheet_writer.py` | 店舗名の照合とセルへの書き込み |
+| `start.bat` | Windows でローカルサーバとして起動する |
