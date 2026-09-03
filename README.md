@@ -10,6 +10,8 @@
 - `requirements.txt`: デプロイ時に入れる Python パッケージ
 - `.github/workflows/ci.yml`: GitHub Actions の最低限の構文チェック
 - `.streamlit/config.toml`: 公開時の Streamlit 表示設定
+- `apps/`: 本体とは独立した補助アプリ置き場
+  - `apps/store_photo_uploader/`: 店舗写真アップロードフォーム（Google Drive 保存 + スプレッドシート連携）
 
 ## ローカル起動
 

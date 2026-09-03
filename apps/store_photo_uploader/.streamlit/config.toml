@@ -1,0 +1,7 @@
+[server]
+# アプリ側の MAX_FILE_MB と揃えておく（アップローダーの案内表示に使われる）。
+# MAX_FILE_MB を上げるときは、この値も一緒に上げること。
+maxUploadSize = 20
+
+[browser]
+gatherUsageStats = false
